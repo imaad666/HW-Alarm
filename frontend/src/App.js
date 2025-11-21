@@ -1,282 +1,194 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function App() {
+  const [sessionId, setSessionId] = useState(null);
   const [location, setLocation] = useState('');
-  const [products, setProducts] = useState({
-    blinkit: [],
-    zepto: [],
-    swiggy: []
-  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [products, setProducts] = useState({ blinkit: [], zepto: [], swiggy: [] });
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState('');
-  const [subscribed, setSubscribed] = useState(false);
-  const [error, setError] = useState(null);
-  const [lastChecked, setLastChecked] = useState(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
+  const [locationSet, setLocationSet] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
 
-  // Common Indian locations for demo
-  const commonLocations = [
-    'Mumbai',
-    'Delhi',
-    'Bangalore',
-    'Hyderabad',
-    'Chennai',
-    'Pune',
-    'Kolkata',
-    'Ahmedabad'
-  ];
+  // Init session on load
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const res = await axios.post(`${API_BASE_URL}/api/init-session`);
+        setSessionId(res.data.sessionId);
+        console.log('Session initialized:', res.data.sessionId);
+      } catch (err) {
+        console.error('Failed to init session:', err);
+      }
+    };
+    initSession();
 
-  const searchProducts = async () => {
-    if (!location.trim()) {
-      setError('Please enter a location');
-      return;
-    }
+    return () => {
+      // Cleanup on unmount (optional, might want to keep session alive for refresh)
+      // if (sessionId) axios.post(`${API_BASE_URL}/api/close-session`, { sessionId });
+    };
+  }, []);
 
+  const handleSetLocation = async () => {
+    if (!location || !sessionId) return;
     setLoading(true);
-    setError(null);
+    setStatusMsg('Setting location on Blinkit, Zepto, and Swiggy... This may take up to 30s.');
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/search`, {
-        location: location.trim()
+      const res = await axios.post(`${API_BASE_URL}/api/set-location`, {
+        sessionId,
+        location
       });
 
-      setProducts(response.data);
-      setDemoMode(response.data.demo === true);
-      setLastChecked(new Date());
+      if (res.data.success) {
+        setLocationSet(true);
+        setStatusMsg('Location set successfully! You can now search.');
+      } else {
+        setStatusMsg('Failed to set location on some platforms. Try again.');
+      }
     } catch (err) {
-      console.error('Search error:', err);
-      setError('Failed to search for products. Make sure the backend server is running.');
+      setStatusMsg('Error setting location.');
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const subscribeForAlerts = async () => {
-    if (!email.trim() || !location.trim()) {
-      setError('Please enter both email and location');
+  const handleSearch = async () => {
+    if (!searchQuery || !sessionId) return;
+    if (!locationSet) {
+      alert('Please set your location first!');
       return;
     }
 
+    setLoading(true);
+    setStatusMsg(`Searching for "${searchQuery}"...`);
+    setProducts({ blinkit: [], zepto: [], swiggy: [] }); // Clear previous
+
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/subscribe`, {
-        email: email.trim(),
-        location: location.trim()
+      const res = await axios.post(`${API_BASE_URL}/api/search`, {
+        sessionId,
+        query: searchQuery
       });
 
-      if (response.data.success) {
-        setSubscribed(true);
-        setError(null);
-      }
+      setProducts(res.data);
+      setStatusMsg(`Found ${res.data.blinkit.length + res.data.zepto.length + res.data.swiggy.length} products.`);
     } catch (err) {
-      console.error('Subscribe error:', err);
-      setError('Failed to subscribe. Make sure the backend server is running.');
+      setStatusMsg('Search failed.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    // Auto-refresh every 5 minutes if enabled
-    if (autoRefresh && location) {
-      const interval = setInterval(() => {
-        searchProducts();
-      }, 5 * 60 * 1000); // 5 minutes
-
-      return () => clearInterval(interval);
+  const detectLocation = () => {
+    if (navigator.geolocation) {
+      setStatusMsg('Detecting location...');
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          const data = await response.json();
+          const city = data.address.city || data.address.town || data.address.suburb;
+          const area = data.address.suburb || data.address.neighbourhood || '';
+          setLocation(area ? `${area}, ${city}` : city);
+          setStatusMsg('Location detected. Click "Set Location" to confirm.');
+        } catch (error) {
+          setStatusMsg('Could not detect location name.');
+        }
+      }, () => setStatusMsg('Location access denied.'));
     }
-  }, [autoRefresh, location]);
-
-  // Request notification permission on mount
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  const showNotification = (product) => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(`New Hot Wheels in stock!`, {
-        body: `${product.name} available on ${product.platform} for ₹${product.price}`,
-        icon: product.image || '/favicon.ico'
-      });
-    }
-  };
-
-  const allProducts = [
-    ...products.blinkit,
-    ...products.zepto,
-    ...products.swiggy
-  ].filter(p => p && p.available);
-
-  const groupedByPlatform = {
-    'Blinkit': products.blinkit.filter(p => p && p.available),
-    'Zepto': products.zepto.filter(p => p && p.available),
-    'Swiggy Instamart': products.swiggy.filter(p => p && p.available)
   };
 
   return (
     <div className="App">
-      <header className="App-header">
-        <h1>🔥 Hot Wheels Alerts</h1>
-        <p>Track Hot Wheels availability across Blinkit, Zepto & Swiggy</p>
-        {demoMode && (
-          <div style={{
-            marginTop: '1rem',
-            padding: '0.75rem 1.5rem',
-            background: 'rgba(255, 193, 7, 0.2)',
-            border: '2px solid rgba(255, 193, 7, 0.5)',
-            borderRadius: '8px',
-            color: '#fff',
-            fontWeight: '600'
-          }}>
-            🎭 DEMO MODE: Showing sample data. Configure real APIs to see actual products.
-          </div>
-        )}
+      <header className="header">
+        <div className="logo">🔥 QuickCom Tracker</div>
+        <div className="status-bar">{statusMsg}</div>
       </header>
 
-      <main className="main-container">
-        <div className="search-section">
-          <div className="input-group">
-            <label htmlFor="location">Location:</label>
-            <input
-              id="location"
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Enter your city"
-              list="locations"
-              className="location-input"
-            />
-            <datalist id="locations">
-              {commonLocations.map((loc) => (
-                <option key={loc} value={loc} />
-              ))}
-            </datalist>
+      <main className="container">
+        <div className="controls-section">
+          <div className="control-group">
+            <label>1. Set Location</label>
+            <div className="input-wrapper">
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. Bandra West, Mumbai"
+                disabled={loading || locationSet}
+              />
+              <button onClick={detectLocation} disabled={loading || locationSet} title="Detect">📍</button>
+              <button
+                className={`primary-btn ${locationSet ? 'success' : ''}`}
+                onClick={handleSetLocation}
+                disabled={loading || locationSet}
+              >
+                {locationSet ? '✓ Set' : 'Set Location'}
+              </button>
+            </div>
           </div>
 
-          <button 
-            onClick={searchProducts} 
-            disabled={loading}
-            className="search-button"
-          >
-            {loading ? 'Searching...' : '🔍 Search Hot Wheels'}
-          </button>
-
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            Auto-refresh every 5 minutes
-          </label>
-
-          {lastChecked && (
-            <p className="last-checked">
-              Last checked: {new Date(lastChecked).toLocaleTimeString()}
-            </p>
-          )}
+          <div className="control-group">
+            <label>2. Search Products</label>
+            <div className="input-wrapper">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="e.g. Hot Wheels, Milk, Bread"
+                disabled={loading}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              />
+              <button
+                className="primary-btn"
+                onClick={handleSearch}
+                disabled={loading}
+              >
+                {loading ? '...' : '🔍 Search'}
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="subscribe-section">
-          <h3>🔔 Get Notified</h3>
-          <div className="subscribe-form">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              className="email-input"
-            />
-            <button 
-              onClick={subscribeForAlerts} 
-              disabled={subscribed}
-              className="subscribe-button"
-            >
-              {subscribed ? '✓ Subscribed' : 'Subscribe for Alerts'}
-            </button>
-          </div>
-          {subscribed && (
-            <p className="success-message">
-              You'll be notified when new Hot Wheels are added!
-            </p>
-          )}
-        </div>
-
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
-
-        <div className="products-section">
-          {allProducts.length > 0 ? (
-            <>
-              <h2 className="section-title">
-                Available Hot Wheels ({allProducts.length} products)
-              </h2>
-              
-              {Object.entries(groupedByPlatform).map(([platform, platformProducts]) => {
-                if (platformProducts.length === 0) return null;
-                
-                return (
-                  <div key={platform} className="platform-section">
-                    <h3 className="platform-title">{platform}</h3>
-                    <div className="products-grid">
-                      {platformProducts.map((product) => (
-                        <div key={product.id} className="product-card">
-                          {product.image && (
-                            <img 
-                              src={product.image} 
-                              alt={product.name}
-                              className="product-image"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                              }}
-                            />
-                          )}
-                          <div className="product-info">
-                            <h4 className="product-name">{product.name}</h4>
-                            <p className="product-price">₹{product.price}</p>
-                            {product.url && (
-                              <a 
-                                href={product.url} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="product-link"
-                              >
-                                View on {platform} →
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          ) : (
-            !loading && (
-              <div className="no-products">
-                <p>No Hot Wheels products found. Try searching or check back later!</p>
-                <p className="hint">💡 Make sure you've entered a valid location and the APIs are properly configured.</p>
-              </div>
-            )
-          )}
+        <div className="results-grid">
+          <PlatformColumn title="Blinkit" color="#f8cb46" products={products.blinkit} />
+          <PlatformColumn title="Zepto" color="#5d30c1" products={products.zepto} />
+          <PlatformColumn title="Swiggy Instamart" color="#fc8019" products={products.swiggy} />
         </div>
       </main>
+    </div>
+  );
+}
 
-      <footer className="App-footer">
-        <p>⚠️ Educational purposes only. Use responsibly and in compliance with platform terms of service.</p>
-        <p>You need to configure the actual API endpoints by capturing requests from browser DevTools.</p>
-      </footer>
+function PlatformColumn({ title, color, products }) {
+  return (
+    <div className="platform-col">
+      <h2 style={{ borderBottom: `4px solid ${color}` }}>{title} <span className="count">({products.length})</span></h2>
+      <div className="products-list">
+        {products.length === 0 ? (
+          <div className="empty-state">No results</div>
+        ) : (
+          products.map((p, i) => (
+            <div key={i} className={`product-card ${!p.available ? 'out-of-stock' : ''}`}>
+              <div className="img-wrapper">
+                <img src={p.image} alt={p.name} onError={(e) => e.target.style.display = 'none'} />
+              </div>
+              <div className="info">
+                <div className="price">₹{p.price}</div>
+                <div className="name" title={p.name}>{p.name}</div>
+                {!p.available && <div className="tag">Out of Stock</div>}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
 
 export default App;
-
