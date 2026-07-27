@@ -1,128 +1,61 @@
-# Hot Wheels Tracker
+# 🚗 Hot Wheels Tracker
 
-A product tracking application that searches for Hot Wheels products across multiple platforms (Blinkit, Zepto) and allows you to track prices over time.
+Track Hot Wheels product prices across **Blinkit** and **Zepto**.
 
-## Features
+## Stack
+| Side | Tech |
+|---|---|
+| Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
+| Backend | Node.js + Express + Puppeteer + SQLite |
 
-- 🔍 Search for Hot Wheels products across multiple platforms
-- 📊 Track product prices over time
-- 🔔 Set price alerts
-- 📈 View price history
-- 🎯 Compare prices across platforms
+## Quick Start
 
-## Tech Stack
-
-**Frontend:**
-- React + TypeScript
-- Vite
-- Tailwind CSS
-
-**Backend:**
-- Node.js + Express
-- Puppeteer (web scraping)
-- SQLite (database)
-
-## Setup
-
-### Prerequisites
-
-- Node.js (v18 or higher)
-- npm or yarn
-
-### Backend Setup
-
-1. Navigate to the backend directory:
+### Backend
 ```bash
 cd backend
-```
-
-2. Install dependencies:
-```bash
 npm install
+npm run dev        # runs on http://localhost:3000
 ```
 
-3. Start the server:
-```bash
-npm run dev
-```
-
-The backend API will run on `http://localhost:3000`
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
+### Frontend
 ```bash
 cd frontend
-```
-
-2. Install dependencies:
-```bash
 npm install
+npm run dev        # runs on http://localhost:5173
 ```
 
-3. Start the development server:
-```bash
-npm run dev
-```
+Vite proxies `/api/*` → `localhost:3000`, so no CORS config needed in development.
 
-The frontend will run on `http://localhost:5173`
+## API
 
-## API Endpoints
-
-- `POST /api/search` - Search for products
-  - Body: `{ query: string, location?: string }`
-  
-- `GET /api/products` - Get all tracked products
-- `GET /api/products/:id` - Get product details with price history
-- `GET /api/products/:id/history` - Get price history for a product
-
-- `POST /api/track` - Add product to tracking
-  - Body: `{ name, platform, price, image?, url?, weight? }`
-- `GET /api/track` - Get all tracked products
-- `DELETE /api/track/:id` - Remove product from tracking
-- `POST /api/track/:id/alert` - Create price alert
-  - Body: `{ target_price: number }`
-
-## Usage
-
-1. Start both backend and frontend servers
-2. Open the frontend in your browser
-3. Enter a search query (e.g., "Hot Wheels")
-4. Optionally enter your location for better results
-5. Click "Search" to find products across platforms
-6. Click "Track" on any product to start tracking its price
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/search` | Scrape Blinkit + Zepto. Body: `{ query, location? }` |
+| `GET` | `/api/track` | All tracked products |
+| `POST` | `/api/track` | Add/update a tracked product |
+| `DELETE` | `/api/track/:id` | Remove from tracking |
+| `POST` | `/api/track/:id/alert` | Set price alert. Body: `{ target_price }` |
+| `GET` | `/api/products/:id` | Product + price history |
+| `GET` | `/api/products/:id/history` | Price history only |
 
 ## Project Structure
-
 ```
-HW-Alarm/
 ├── backend/
-│   ├── database/
-│   │   └── db.js          # Database setup and queries
+│   ├── database/db.js       — SQLite (shared connection, WAL mode)
 │   ├── routes/
-│   │   ├── products.js    # Product routes
-│   │   └── track.js       # Tracking routes
+│   │   ├── track.js         — track/untrack/alerts
+│   │   └── products.js      — product + history queries
 │   ├── scrapers/
-│   │   ├── index.js       # Main scraper orchestrator
-│   │   ├── blinkit.js     # Blinkit scraper
-│   │   └── zepto.js       # Zepto scraper
-│   ├── data/              # SQLite database storage
-│   └── server.js          # Express server
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── SearchBar.tsx
-│   │   │   ├── ProductCard.tsx
-│   │   │   └── ProductGrid.tsx
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   └── ...
-└── README.md
+│   │   ├── index.js         — parallel orchestrator
+│   │   ├── blinkit.js       — Blinkit Puppeteer scraper
+│   │   └── zepto.js         — Zepto Puppeteer scraper
+│   └── server.js
+└── frontend/src/
+    ├── App.tsx              — root, two-tab layout (Search / Tracked)
+    ├── components/
+    │   ├── SearchBar.tsx
+    │   ├── ProductGrid.tsx
+    │   ├── ProductCard.tsx
+    │   └── TrackedList.tsx
+    └── utils/api.ts         — typed fetch helpers
 ```
-
-## Notes
-
-- Web scraping may be rate-limited by the target platforms
-- Location-based searches may require manual location selection on some platforms
-- The database is automatically created on first run
-
