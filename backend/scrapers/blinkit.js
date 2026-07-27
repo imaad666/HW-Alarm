@@ -1,106 +1,115 @@
 import puppeteer from 'puppeteer';
 
+const BLINKIT_URL = 'https://blinkit.com/s/?q=';
+const TIMEOUT = 20_000;
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 /**
- * Search for products on Blinkit
- * @param {string} query - Product search query
- * @param {string} location - Location for delivery
- * @returns {Promise<Array>} Array of product objects
+ * Search Blinkit for products.
+ *
+ * Blinkit renders a React SPA. The product grid uses these stable selectors:
+ *   - Product container : div[data-testid="product-atom"]   (each product card)
+ *   - Product name      : div[class^="Product__Name"]  (or innerText of .plp-product__title)
+ *   - Price             : span.Price-originalPrice  or  div[class^="Product__Price"]
+ *   - Image             : img  (first inside the card)
+ *   - Weight/qty        : div[class^="Product__Weight"]
+ *
+ * Blinkit does NOT require login or location for search — it serves results
+ * based on the default city hub. We navigate directly to the search URL.
  */
-export async function searchBlinkit(query, location = '') {
+export async function searchBlinkit(query, _location = '') {
   let browser;
-  
   try {
     browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    
-    // Navigate to Blinkit
-    await page.goto('https://blinkit.com', { waitUntil: 'networkidle2' });
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+    await page.setViewport({ width: 1280, height: 900 });
 
-    // Handle location if provided
-    if (location) {
-      try {
-        // Look for location input/selector
-        const locationSelector = 'input[placeholder*="location"], input[placeholder*="Location"], input[placeholder*="area"]';
-        const locationInput = await page.$(locationSelector);
-        
-        if (locationInput) {
-          await locationInput.type(location, { delay: 100 });
-          await page.waitForTimeout(1000);
-          // Try to select first suggestion
-          await page.keyboard.press('Enter');
-          await page.waitForTimeout(2000);
-        }
-      } catch (err) {
-        console.log('Location setting skipped:', err.message);
-      }
+    const url = `${BLINKIT_URL}${encodeURIComponent(query)}`;
+    console.log(`[blinkit] fetching: ${url}`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+
+    // Wait for product cards to appear — try multiple selector patterns
+    const cardSelector = [
+      'div[data-testid="product-atom"]',
+      '.Product__UpdatedPlpProductContainer-sc',
+      '.plp-product__container',
+    ].join(', ');
+
+    try {
+      await page.waitForSelector(cardSelector, { timeout: 10_000 });
+    } catch {
+      // Page may have loaded without products (empty results or geo-block)
+      console.warn('[blinkit] no product cards found — returning []');
+      return [];
     }
 
-    // Search for products
-    const searchSelector = 'input[placeholder*="Search"], input[type="search"], input[name*="search"]';
-    await page.waitForSelector(searchSelector, { timeout: 5000 });
-    await page.type(searchSelector, query, { delay: 100 });
-    await page.keyboard.press('Enter');
-    
-    // Wait for results to load
-    await page.waitForTimeout(3000);
-    
-    // Extract product data
+    // Small pause for lazy images
+    await sleep(1000);
+
     const products = await page.evaluate(() => {
-      const productCards = document.querySelectorAll('[class*="product"], [class*="Product"], [data-testid*="product"]');
-      const results = [];
+      // Blinkit uses hashed class names — look for data-testid first, then fall back
+      const cards = [
+        ...document.querySelectorAll('div[data-testid="product-atom"]'),
+      ];
 
-      productCards.forEach((card, index) => {
-        if (index >= 10) return; // Limit to 10 products
+      // Fallback: any div whose class starts with "Product__UpdatedPlpProduct"
+      const fallbackCards = cards.length === 0
+        ? [...document.querySelectorAll('div[class*="Product__Updated"]')]
+        : [];
 
-        try {
-          // Try to find product name
-          const nameElement = card.querySelector('h3, h4, [class*="name"], [class*="title"]');
-          const name = nameElement?.textContent?.trim() || '';
+      const all = cards.length > 0 ? cards : fallbackCards;
 
-          // Try to find price
-          const priceElement = card.querySelector('[class*="price"], [class*="Price"], span[class*="rupee"]');
-          const priceText = priceElement?.textContent?.trim() || '';
-          const price = parseFloat(priceText.replace(/[^\d.]/g, '')) || 0;
+      return all.slice(0, 12).map(card => {
+        // Name — try several patterns
+        const name =
+          card.querySelector('[class*="Product__Name"]')?.textContent?.trim() ||
+          card.querySelector('[class*="plp-product__title"]')?.textContent?.trim() ||
+          card.querySelector('h5, h4, h3')?.textContent?.trim() ||
+          '';
 
-          // Try to find image
-          const imgElement = card.querySelector('img');
-          const image = imgElement?.src || imgElement?.getAttribute('data-src') || '';
+        // Price — Blinkit shows price in a styled span
+        const priceRaw =
+          card.querySelector('[class*="Price__StyledPrice"]')?.textContent?.trim() ||
+          card.querySelector('[class*="Product__Price"]')?.textContent?.trim() ||
+          card.querySelector('[class*="price"]')?.textContent?.trim() ||
+          '';
+        const price = parseFloat(priceRaw.replace(/[^0-9.]/g, '')) || 0;
 
-          // Try to find weight/quantity
-          const weightElement = card.querySelector('[class*="weight"], [class*="quantity"], [class*="size"]');
-          const weight = weightElement?.textContent?.trim() || '';
+        // Image
+        const img = card.querySelector('img');
+        const image = img?.src || img?.dataset?.src || '';
 
-          if (name && price > 0) {
-            results.push({
-              name,
-              price,
-              image,
-              weight,
-              platform: 'blinkit',
-              url: window.location.href
-            });
-          }
-        } catch (err) {
-          console.error('Error extracting product:', err);
-        }
-      });
+        // Weight
+        const weight =
+          card.querySelector('[class*="Product__Weight"]')?.textContent?.trim() ||
+          card.querySelector('[class*="weight"]')?.textContent?.trim() ||
+          '';
 
-      return results;
+        return name && price > 0 ? { name, price, image, weight, platform: 'blinkit', url: window.location.href } : null;
+      }).filter(Boolean);
     });
 
+    console.log(`[blinkit] found ${products.length} products`);
     return products;
-  } catch (error) {
-    console.error('Blinkit scraping error:', error);
+  } catch (err) {
+    console.error('[blinkit] scrape error:', err.message);
     return [];
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    await browser?.close();
   }
 }
-

@@ -1,43 +1,26 @@
 import { searchBlinkit } from './blinkit.js';
 import { searchZepto } from './zepto.js';
-// import { searchSwiggy } from './swiggy.js';
 
 /**
- * Search for products across all platforms
- * @param {string} query - Product search query
- * @param {string} location - Location for delivery
- * @returns {Promise<Object>} Results from all platforms
+ * Search all platforms in parallel.
+ * Each platform scraper resolves to an array of product objects.
  */
 export async function searchProducts(query, location = '') {
-  const results = {
-    blinkit: [],
-    zepto: [],
-    // swiggy: [],
-    timestamp: new Date().toISOString()
-  };
-
-  // Search all platforms in parallel
-  const promises = [
+  const [blinkit, zepto] = await Promise.all([
     searchBlinkit(query, location).catch(err => {
-      console.error('Blinkit search error:', err);
+      console.error('[blinkit]', err.message);
       return [];
     }),
     searchZepto(query, location).catch(err => {
-      console.error('Zepto search error:', err);
+      console.error('[zepto]', err.message);
       return [];
     }),
-    // searchSwiggy(query, location).catch(err => {
-    //   console.error('Swiggy search error:', err);
-    //   return [];
-    // })
-  ];
+  ]);
 
-  const [blinkitResults, zeptoResults] = await Promise.all(promises);
-  
-  results.blinkit = blinkitResults;
-  results.zepto = zeptoResults;
-  // results.swiggy = swiggyResults;
-
-  return results;
+  return {
+    blinkit,
+    zepto,
+    total: blinkit.length + zepto.length,
+    timestamp: new Date().toISOString(),
+  };
 }
-
