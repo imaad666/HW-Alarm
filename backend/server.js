@@ -1,47 +1,39 @@
 import express from 'express';
 import cors from 'cors';
-import { searchProducts } from './scrapers/index.js';
 import { initDatabase } from './database/db.js';
+import { searchProducts } from './scrapers/index.js';
 import productRoutes from './routes/products.js';
 import trackRoutes from './routes/track.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Initialize database
 await initDatabase();
 
-// Routes
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Hot Wheels Tracker API is running' });
-});
+// Health check
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-// Search endpoint
+// Search across all platforms
 app.post('/api/search', async (req, res) => {
+  const { query, location = '' } = req.body;
+  if (!query?.trim()) {
+    return res.status(400).json({ error: 'query is required' });
+  }
   try {
-    const { query, location } = req.body;
-    
-    if (!query) {
-      return res.status(400).json({ error: 'Query parameter is required' });
-    }
-
-    const results = await searchProducts(query, location || '');
+    const results = await searchProducts(query.trim(), location.trim());
     res.json(results);
-  } catch (error) {
-    console.error('Search error:', error);
-    res.status(500).json({ error: 'Failed to search products', message: error.message });
+  } catch (err) {
+    console.error('Search error:', err);
+    res.status(500).json({ error: 'Search failed', detail: err.message });
   }
 });
 
-// Product routes
 app.use('/api/products', productRoutes);
 app.use('/api/track', trackRoutes);
 
 app.listen(PORT, () => {
-  console.log(`🚗 Hot Wheels Tracker API running on http://localhost:${PORT}`);
+  console.log(`🚗 Hot Wheels Tracker API → http://localhost:${PORT}`);
 });
-
