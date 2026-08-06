@@ -83,31 +83,4 @@ RESTOCK_WINDOWS=06:00-06:30,10:00-10:30,14:00-14:30,18:00-18:30
 
 ---
 
-## Project Structure
-
-```
-backend/
-├── checkers/
-│   ├── index.js        — routes URL to correct checker
-│   ├── blinkit.js      — Blinkit availability checker
-│   ├── zepto.js        — Zepto availability checker
-│   ├── swiggy.js       — Swiggy availability checker
-│   ├── bigbasket.js    — BigBasket availability checker
-│   └── utils.js        — detectPlatform, makeResult
-├── config/config.js    — reads .env, exposes config object
-├── database/db.js      — SQLite (products + check_log tables)
-├── notifier/telegram.js — Telegram bot notifications
-├── routes/products.js  — Express API routes
-├── scheduler/index.js  — cron polling + restock window logic
-└── server.js
-
-frontend/src/
-├── App.tsx                      — root, stats bar, product list
-├── components/
-│   ├── AddProductForm.tsx        — paste URL input
-│   ├── ProductRow.tsx            — per-product status card
-│   └── PlatformBadge.tsx        — coloured platform pill
-└── utils/
-    ├── api.ts                   — typed fetch helpers
-    └── platform.ts              — client-side platform detection
 ```
